@@ -1,0 +1,32 @@
+[project]
+name = "my-first-ai-agent"
+version = "0.1.0"
+description = "Terminal chat agent that talks to an OpenAI-compatible API"
+readme = "README.md"
+authors = [
+    { name = "Valentino Pereira", email = "vaperx@tuta.io" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=3.11.0",
+    "prompt-toolkit>=3.0.0",
+    "python-dotenv>=1.2.3",
+    "rich>=15.0.0",
+]
+
+[project.scripts]
+my-first-ai-agent = "my_first_ai_agent:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.6",
+    "pytest>=8.0.0",
+]
