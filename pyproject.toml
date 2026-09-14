@@ -8,10 +8,10 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "openai>=3.11.0",
-    "prompt-toolkit>=3.0.0",
-    "python-dotenv>=1.2.3",
-    "rich>=15.0.0",
+    "openai>=3.11.0,<4",
+    "prompt-toolkit>=3.0.0,<4",
+    "python-dotenv>=1.2.3,<2",
+    "rich>=15.0.0,<16",
 ]
 
 [project.scripts]
