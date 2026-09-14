@@ -129,8 +129,8 @@ def test_clean_text_keeps_whitespace_but_strips_escapes():
     assert clean_text("x\x1b]0;title\x07y") == "xy"
     # \r\n collapses to \n, a bare \r (line spoofing) is dropped
     assert clean_text("line\r\nspoof\red inline") == "line\nspoofed inline"
-    # C1 controls (incl. 8-bit CSI U+009B) are dropped
-    assert clean_text("a\u009bb\u009B2Jc") == "abc"
+    # C1 controls dropped; an 8-bit CSI (U+009B + params) leaves inert text
+    assert clean_text("a\u009bb\u009B2Jc") == "ab2Jc"
     # bidi overrides and zero-width characters are dropped
     assert clean_text("i\u202ed\u200bi\u2066t") == "idit"
     # DCS payload is left as inert text (escape removed, rest kept)
