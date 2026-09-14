@@ -34,13 +34,19 @@ def print_stream(chunks: Iterable[str]) -> str:
     come. A newline is printed at the end unless the stream was empty.
     """
     parts: list[str] = []
-    for chunk in chunks:
-        if not parts:
-            _console.log("Working...")
-        # Control chars are safe to strip per chunk; escape sequences can span
-        # chunk boundaries, so the joined text is cleaned again by the caller.
-        parts.append(chunk)
-        print(_CONTROL_PART.sub("", chunk), end="", flush=True)
+    status = _console.status("Working...")
+    status.start()
+    try:
+        for chunk in chunks:
+            if not parts:
+                status.stop()  # replace the spinner with the actual reply
+            # Control chars are safe to strip per chunk; escape sequences can
+            # span chunk boundaries, so the joined text is cleaned again by
+            # the caller.
+            parts.append(chunk)
+            print(_CONTROL_PART.sub("", chunk), end="", flush=True)
+    finally:
+        status.stop()
     if parts:
         print()
     return "".join(parts)
