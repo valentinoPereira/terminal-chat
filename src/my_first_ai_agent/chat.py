@@ -56,6 +56,26 @@ def clean_text(text: str) -> str:
     return _CONTROL_CHARS.sub("", _ANSI_ESCAPE.sub("", text))
 
 
+def _content_text(content: Any) -> str:
+    """Normalize a message's `content` into plain text.
+
+    Handles None (empty string), a list of content parts (text parts are
+    joined) and plain strings.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            text = part.get("text") if isinstance(part, dict) else getattr(part, "text", None)
+            if text:
+                parts.append(str(text))
+        return "\n".join(parts)
+    return str(content)
+
+
 def trim_context(
     context: list[ChatCompletionMessageParam],
     max_chars: int = MAX_CONTEXT_CHARS,
@@ -69,10 +89,10 @@ def trim_context(
 
     system = context[0] if context[0].get("role") == "system" else None
     body = context[1:] if system else context
-    size = len(str(system.get("content", ""))) if system else 0
+    size = len(_content_text(system.get("content"))) if system else 0
     keep: list[ChatCompletionMessageParam] = []
     for message in reversed(body):
-        content = str(message.get("content", ""))
+        content = _content_text(message.get("content"))
         if len(content) > budget:
             content = content[:budget]  # truncate a single oversize message
         if size + len(content) > budget and keep:
@@ -191,7 +211,10 @@ def run_repl() -> None:
         try:
             result = exchange(client, context, line)
         except KeyboardInterrupt:
-            print("\nStopped.")
-            break
+            # Cancel the in-flight request and roll back the pending user
+            # message so the prompt comes back instead of the app exiting.
+            print()
+            _rollback_user_message(context)
+            continue
         if result is not None:
-            print(f">>> {result}\n")
+            print()  # spacing after the streamed reply

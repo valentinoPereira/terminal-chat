@@ -178,6 +178,21 @@ def test_trim_context_truncates_oversize_single_message():
     assert len(trimmed[-1]["content"]) == 25
 
 
+def test_trim_context_handles_none_and_list_content():
+    context = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": None},
+        {"role": "assistant", "content": [{"type": "text", "text": "part one"}, {"type": "text", "text": "part two"}]},
+        {"role": "user", "content": 42},
+    ]
+
+    trimmed = trim_context(context, max_chars=200, reserve=10)
+
+    assert trimmed[1]["content"] == ""
+    assert trimmed[2]["content"] == "part one\npart two"
+    assert trimmed[3]["content"] == "42"
+
+
 def test_create_client_uses_neuralwatt_key_and_ignores_ambient_openai_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-ambient")
     monkeypatch.setenv("NEURALWATT_API_KEY", "nw-correct")
