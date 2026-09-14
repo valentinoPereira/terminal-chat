@@ -166,11 +166,13 @@ def _iter_stream_text(
     """Yield text deltas from a streaming completion, rejecting malformed chunks."""
     for chunk in stream:
         choices = getattr(chunk, "choices", None)
+        # Providers legitimately stream trailing chunks (usage, keep-alive)
+        # with an empty choices list; skip them instead of failing.
         if not choices:
-            raise ValueError("API response contained no choices")
+            continue
         delta = getattr(choices[0], "delta", None)
-        if delta is None:
-            raise ValueError("API response contained no message")
+        if delta is None:  # finish-only chunk, no content payload
+            continue
         if delta.content:
             yield delta.content
 

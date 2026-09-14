@@ -76,22 +76,26 @@ def test_exchange_api_error_rolls_back_user_message(capsys):
     assert "x" * 900 not in out  # error text is capped at 500 chars
 
 
-def test_exchange_malformed_choices_rolls_back_user_message(capsys):
-    class EmptyChoices:
+def test_exchange_empty_choices_chunk_is_tolerated(capsys):
+    class KeepAlive:
         def create(self, model, messages, stream, max_tokens):
             assert stream is True
-            # A chunk without any choices is malformed.
+            # Providers stream legitimate chunks with no choices (keep-alive,
+            # usage) alongside content chunks.
             yield SimpleNamespace(choices=[])
+            yield chunk("hel")
+            yield SimpleNamespace(choices=[])
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=None, finish_reason="stop")])
             yield chunk(None)
 
-    client = SimpleNamespace(chat=SimpleNamespace(completions=EmptyChoices()))
+    client = SimpleNamespace(chat=SimpleNamespace(completions=KeepAlive()))
     context = [{"role": "system", "content": "sys"}]
 
     result = exchange(client, context, "hi")
 
-    assert result is None
-    assert context == [{"role": "system", "content": "sys"}]
-    assert "[invalid response]" in capsys.readouterr().out
+    assert result == "hel"
+    assert context[-1]["role"] == "assistant"
+    assert "[invalid response]" not in capsys.readouterr().out
 
 
 def test_exchange_builds_text_from_streamed_chunks(capsys):
