@@ -30,14 +30,19 @@ MAX_INPUT_CHARS = 8_000
 # Hard cap on generated reply tokens, so latency and cost stay bounded.
 MAX_RESPONSE_TOKENS = 2_000
 
-# Strip C0 control characters and DEL so untrusted model output cannot
-# manipulate the terminal. Ordinary text, tabs, newlines and carriage returns
-# are preserved. Also removes complete ANSI escape sequences (CSI/OSC/single
-# char) which are how terminals are actually controlled.
+# Strip control characters and DEL so untrusted model output cannot
+# manipulate the terminal. C1 controls (U+0080-U+009F, incl. 8-bit CSI
+# U+009B), bare carriage returns (line spoofing) and DEL are all removed;
+# \r\n still collapses to \n. Ordinary text, tabs and newlines are kept.
+# Also removes complete ANSI escape sequences (CSI/OSC/single char) which
+# are how terminals are actually controlled, plus bidi overrides and
+# zero-width/invisible characters that can disguise hostile text.
 _ANSI_ESCAPE = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b."
 )
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CONTROL_CHARS = re.compile(
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]"
+)
 
 
 Message = dict[str, Any]

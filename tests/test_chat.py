@@ -124,9 +124,24 @@ def test_exchange_strips_terminal_control_characters():
 
 
 def test_clean_text_keeps_whitespace_but_strips_escapes():
-    assert clean_text("a\tb\n\r\x1b[2Jc\x07d") == "a\tb\n\rcd"
+    assert clean_text("a\tb\n\x1b[2Jc\x07d") == "a\tb\ncd"
     # OSC sequence terminated by BEL is removed entirely
     assert clean_text("x\x1b]0;title\x07y") == "xy"
+    # \r\n collapses to \n, a bare \r (line spoofing) is dropped
+    assert clean_text("line\r\nspoof\red inline") == "line\nspoofed inline"
+    # C1 controls (incl. 8-bit CSI U+009B) are dropped
+    assert clean_text("a\u009bb\u009B2Jc") == "abc"
+    # bidi overrides and zero-width characters are dropped
+    assert clean_text("i\u202ed\u200bi\u2066t") == "idit"
+    # DCS payload is left as inert text (escape removed, rest kept)
+    assert clean_text("x\x1bP1;2qdata\x1b\\y") == "x1;2qdatay"
+
+    # still fast on adversarial input (linear time)
+    import time
+
+    start = time.perf_counter()
+    clean_text("\u009b\x1b[" * 100_000)
+    assert time.perf_counter() - start < 5
 
 
 def test_trim_context_keeps_system_and_recent_turns():
