@@ -162,9 +162,27 @@ def test_trim_context_keeps_system_and_recent_turns():
     trimmed = trim_context(context, max_chars=30, reserve=5)
 
     assert trimmed[0] == {"role": "system", "content": "sys"}
-    # budget = 25; the newest pair (20 chars) fits, the oldest user (10) does
-    # not, so the tail is kept and the oldest turn is dropped
-    assert [m["role"] for m in trimmed] == ["system", "assistant", "user"]
+    # budget = 25; system (3) leaves 22. The newest user (10) is kept, but
+    # the older pair (20) would push the total to 30, so it is dropped
+    # whole and the request stays at 13.
+    assert [m["role"] for m in trimmed] == ["system", "user"]
+
+
+def test_trim_context_drops_whole_turns_to_keep_pairs():
+    context = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "a" * 4},
+        {"role": "assistant", "content": "b" * 4},
+        {"role": "user", "content": "c" * 4},
+        {"role": "assistant", "content": "d" * 4},
+    ]
+
+    trimmed = trim_context(context, max_chars=15, reserve=0)
+
+    # budget = 15; system (3) leaves 12, exactly one pair (8) fits, and
+    # the older minus the newest pair would not, so only the newest stays
+    assert [m["role"] for m in trimmed] == ["system", "user", "assistant"]
+    assert [len(m["content"]) for m in trimmed[1:]] == [4, 4]
 
 
 def test_trim_context_truncates_oversize_single_message():
@@ -175,7 +193,24 @@ def test_trim_context_truncates_oversize_single_message():
 
     trimmed = trim_context(context, max_chars=30, reserve=5)
 
-    assert len(trimmed[-1]["content"]) == 25
+    # the END of the message is kept; budget (25) minus system (3) = 22
+    assert trimmed[-1]["content"] == "x" * 22
+
+
+def test_trim_context_stays_within_budget_and_keeps_pairs():
+    context = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "a" * 30},
+        {"role": "assistant", "content": "b" * 30},
+    ]
+
+    trimmed = trim_context(context, max_chars=33, reserve=0)
+
+    # budget = 33; system (3) + oversize-truncated messages must fit
+    assert sum(len(m["content"]) for m in trimmed) <= 33
+    # dropping an old turn must never leave the request starting with an
+    # assistant message after the system prompt
+    assert [m["role"] for m in trimmed] == ["system", "user"]
 
 
 def test_trim_context_handles_none_and_list_content():

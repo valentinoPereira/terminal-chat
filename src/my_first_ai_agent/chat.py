@@ -82,24 +82,80 @@ def trim_context(
     reserve: int = MIN_RESPONSE_CHARS,
 ) -> list[ChatCompletionMessageParam]:
     """Trim `context` for one request, keeping the system prompt and the most
-    recent turns that fit within `max_chars` (minus `reserve`)."""
+    recent turns that fit within `max_chars` (minus `reserve`).
+
+    The trimmed history always starts with a user message, an oversize
+    message keeps its end rather than its start, and the total never
+    exceeds the budget.
+    """
     budget = max_chars - reserve
     if not context:
         return context
 
     system = context[0] if context[0].get("role") == "system" else None
     body = context[1:] if system else context
+
+    # Group the body into turns so a user/assistant pair is always kept or
+    # dropped together (an assistant-first history confuses providers).
+    turns: list[list[ChatCompletionMessageParam]] = []
+    for message in body:
+        if message.get("role") == "user" or not turns:
+            turns.append([message])
+        else:
+            turns[-1].append(message)
+
     size = len(_content_text(system.get("content"))) if system else 0
-    keep: list[ChatCompletionMessageParam] = []
-    for message in reversed(body):
-        content = _content_text(message.get("content"))
-        if len(content) > budget:
-            content = content[:budget]  # truncate a single oversize message
-        if size + len(content) > budget and keep:
+    kept_turns: list[list[ChatCompletionMessageParam]] = []
+    for turn in reversed(turns):
+        sizes = [len(_content_text(m.get("content"))) for m in turn]
+        remaining = budget - size
+        if sum(sizes) <= remaining:
+            kept_turns.append(turn)
+            size += sum(sizes)
+            continue
+        if turn is turns[-1] and not kept_turns:
+            # The newest turn is always kept even when it overshoots the
+            # budget: keep its leading messages (so it still starts with a
+            # user turn), truncating the last fitted message to preserve the
+            # end, and dropping what no longer fits.
+            trimmed: list[ChatCompletionMessageParam] = []
+            room = remaining
+            for message, msize in zip(turn, sizes):
+                if msize <= room:
+                    trimmed.append(message)
+                    room -= msize
+                    continue
+                content = _content_text(message.get("content"))
+                if room > 0:
+                    if len(content) > room:
+                        content = content[len(content) - room :]
+                    trimmed.append({**message, "content": content})
+                break
+            kept_turns.append(trimmed)
             break
-        keep.append({**message, "content": content})
-        size += len(content)
-    keep.reverse()
+        break  # older turns are dropped whole once the budget is exhausted
+    # Normalize content (None -> "", lists joined) on everything we keep.
+    keep = [
+        {**message, "content": _content_text(message.get("content"))}
+        for turn in reversed(kept_turns)
+        for message in turn
+    ]
+
+    if not keep:
+        # Fallback: even when nothing fits, always send the newest user
+        # message (truncated) so the request carries the current input.
+        size = len(_content_text(system.get("content"))) if system else 0
+        for message in reversed(body):
+            if message.get("role") != "user":
+                continue
+            remaining = budget - size
+            if remaining <= 0:
+                break
+            content = _content_text(message.get("content"))
+            if len(content) > remaining:
+                content = content[len(content) - remaining :]
+            keep.append({**message, "content": content})
+            break
 
     return ([system] if system else []) + keep
 
@@ -158,6 +214,8 @@ def exchange(
         _rollback_user_message(context)
         return None
     context.append({"role": "assistant", "content": response_text})
+    # Keep the in-memory history bounded too, not only what gets sent.
+    context[:] = trim_context(context)
     return response_text
 
 
