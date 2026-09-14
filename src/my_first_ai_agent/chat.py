@@ -1,13 +1,16 @@
+import os
 import re
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import openai
+from dotenv import dotenv_values
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 
-from .client import create_client
+from .client import API_KEY_ENV, create_client
 from .loader import print_stream, run_with_spinner
 
 SYSTEM_PROMPT = (
@@ -138,10 +141,24 @@ def exchange(
     return response_text
 
 
-def run_repl() -> None:
-    from dotenv import load_dotenv
+def _load_api_key_env() -> None:
+    """Populate os.environ with NEURALWATT_API_KEY from <project root>/.env.
 
-    load_dotenv()
+    The .env path is resolved from this file's location, so loading never
+    walks up parent folders and picks up a stray .env from elsewhere. Only
+    the needed key is read, and only when it is not already set, so other
+    .env variables never enter the process environment (the HTTP client
+    trusts env vars like HTTPS_PROXY and SSL_CERT_FILE).
+    """
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if API_KEY_ENV not in os.environ:
+        value = dotenv_values(env_path).get(API_KEY_ENV)
+        if value:
+            os.environ[API_KEY_ENV] = value
+
+
+def run_repl() -> None:
+    _load_api_key_env()
     print("Type /quit or press Ctrl+C to exit. Type /clear to reset the conversation.")
     try:
         client = create_client()
