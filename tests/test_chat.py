@@ -59,14 +59,21 @@ def test_exchange_none_content_becomes_empty_string():
 
 def test_exchange_api_error_rolls_back_user_message(capsys):
     context = [{"role": "system", "content": "sys"}]
-    error = openai.APIError("boom", request=SimpleNamespace(), body=None)
+    error = openai.APIError(
+        "boom\x1b[2Jescaped\r\n" + "x" * 900,
+        request=SimpleNamespace(),
+        body=None,
+    )
     client = make_client(error=error)
 
     result = exchange(client, context, "hi")
 
     assert result is None
     assert context == [{"role": "system", "content": "sys"}]
-    assert "[api error:APIError]" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "[api error:APIError]" in out
+    assert "\x1b" not in out and "\r" not in out
+    assert "x" * 900 not in out  # error text is capped at 500 chars
 
 
 def test_exchange_malformed_choices_rolls_back_user_message(capsys):

@@ -125,7 +125,9 @@ def exchange(
         stream = run_with_spinner(open_stream)
         response_text = clean_text(print_stream(_iter_stream_text(stream)))
     except openai.APIError as exc:  # covers connection, timeout, rate limit
-        print(f"[api error:{exc.__class__.__name__}] {exc}")
+        # str(exc) can include the raw server/proxy response body, so it
+        # goes through the sanitizer and a length cap before printing.
+        print(f"[api error:{exc.__class__.__name__}] {clean_text(str(exc))[:500]}")
         _rollback_user_message(context)
         return None
     except ValueError as exc:  # malformed API response
