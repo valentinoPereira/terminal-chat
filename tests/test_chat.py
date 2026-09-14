@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from types import SimpleNamespace
 
 import openai
@@ -6,16 +7,27 @@ from my_first_ai_agent.chat import clean_text, exchange, trim_context
 from my_first_ai_agent.client import create_client
 
 
+def chunk(text: str | None):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
+    )
+
+
 class StubCompletions:
     def __init__(self, content: str | None = None, error: Exception | None = None):
         self._content = content
         self._error = error
 
-    def create(self, model: str, messages: list):
+    def create(self, model: str, messages: list, stream: bool, max_tokens: int):
+        assert stream is True
         if self._error is not None:
             raise self._error
-        message = SimpleNamespace(content=self._content)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        def gen() -> Generator:
+            yield chunk(self._content)
+            yield chunk(None)  # final chunk carries no delta
+
+        return gen()
 
 
 def make_client(**kwargs) -> SimpleNamespace:
@@ -59,8 +71,11 @@ def test_exchange_api_error_rolls_back_user_message(capsys):
 
 def test_exchange_malformed_choices_rolls_back_user_message(capsys):
     class EmptyChoices:
-        def create(self, model, messages):
-            return SimpleNamespace(choices=[])
+        def create(self, model, messages, stream, max_tokens):
+            assert stream is True
+            # A chunk without any choices is malformed.
+            yield SimpleNamespace(choices=[])
+            yield chunk(None)
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=EmptyChoices()))
     context = [{"role": "system", "content": "sys"}]
@@ -72,12 +87,34 @@ def test_exchange_malformed_choices_rolls_back_user_message(capsys):
     assert "[invalid response]" in capsys.readouterr().out
 
 
+def test_exchange_builds_text_from_streamed_chunks(capsys):
+    class ChunkStream:
+        def create(self, model, messages, stream, max_tokens):
+            assert stream is True
+            yield chunk("hel")
+            yield chunk("lo")
+            yield chunk(None)
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=ChunkStream()))
+    context = []
+
+    result = exchange(client, context, "hi")
+
+    assert result == "hello"
+    assert context[-1] == {"role": "assistant", "content": "hello"}
+    assert "hello" in capsys.readouterr().out
+
+
 def test_exchange_strips_terminal_control_characters():
-    reply = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="ok\x1b[2J\x1b[Hbye"))]
-    )
+    class EscapeStream:
+        def create(self, model, messages, stream, max_tokens):
+            # The escape sequence is split across chunk boundaries.
+            yield chunk("ok\x1b[")
+            yield chunk("2J\x1b[Hbye")
+            yield chunk(None)
+
     client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: reply))
+        chat=SimpleNamespace(completions=EscapeStream())
     )
 
     result = exchange(client, [], "hi")

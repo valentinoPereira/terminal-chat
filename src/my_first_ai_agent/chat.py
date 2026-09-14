@@ -1,13 +1,14 @@
 import re
+from collections.abc import Generator
 from typing import Any
 
 import openai
-from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 
 from .client import create_client
-from .loader import run_with_spinner
+from .loader import print_stream, run_with_spinner
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant running in the terminal. So always provide "
@@ -26,6 +27,8 @@ CLEAR_COMMAND = "/clear"
 MAX_CONTEXT_CHARS = 16_000
 MIN_RESPONSE_CHARS = 1_000
 MAX_INPUT_CHARS = 8_000
+# Hard cap on generated reply tokens, so latency and cost stay bounded.
+MAX_RESPONSE_TOKENS = 2_000
 
 # Strip C0 control characters and DEL so untrusted model output cannot
 # manipulate the terminal. Ordinary text, tabs, newlines and carriage returns
@@ -73,15 +76,19 @@ def trim_context(
     return ([system] if system else []) + keep
 
 
-def _extract_response_text(response: ChatCompletion) -> str:
-    """Read the assistant text from a completion, rejecting malformed shapes."""
-    choices = getattr(response, "choices", None)
-    if not choices:
-        raise ValueError("API response contained no choices")
-    message = getattr(choices[0], "message", None)
-    if message is None:
-        raise ValueError("API response contained no message")
-    return message.content or ""
+def _iter_stream_text(
+    stream: Generator[ChatCompletionChunk, None, None],
+) -> Generator[str, None, None]:
+    """Yield text deltas from a streaming completion, rejecting malformed chunks."""
+    for chunk in stream:
+        choices = getattr(chunk, "choices", None)
+        if not choices:
+            raise ValueError("API response contained no choices")
+        delta = getattr(choices[0], "delta", None)
+        if delta is None:
+            raise ValueError("API response contained no message")
+        if delta.content:
+            yield delta.content
 
 
 def _rollback_user_message(context: list[ChatCompletionMessageParam]) -> None:
@@ -99,14 +106,19 @@ def exchange(
     it can be retried, and None is returned.
     """
 
-    def send() -> ChatCompletion:
+    def open_stream() -> Generator[ChatCompletionChunk, None, None]:
         request = trim_context(context)
-        return client.chat.completions.create(model=MODEL, messages=request)
+        return client.chat.completions.create(
+            model=MODEL,
+            messages=request,
+            stream=True,
+            max_tokens=MAX_RESPONSE_TOKENS,
+        )
 
     context.append({"role": "user", "content": line})
     try:
-        response = run_with_spinner(send)
-        response_text = clean_text(_extract_response_text(response))
+        stream = run_with_spinner(open_stream)
+        response_text = clean_text(print_stream(_iter_stream_text(stream)))
     except openai.APIError as exc:  # covers connection, timeout, rate limit
         print(f"[api error:{exc.__class__.__name__}] {exc}")
         _rollback_user_message(context)
